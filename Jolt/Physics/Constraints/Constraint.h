@@ -146,6 +146,11 @@ public:
 	void						SetNumPositionStepsOverride(uint inN)		{ JPH_ASSERT(inN < 256); mNumPositionStepsOverride = uint8(inN); }
 	uint						GetNumPositionStepsOverride() const			{ return mNumPositionStepsOverride; }
 
+	/// Override the fraction of positional error corrected per solver step. A negative value uses PhysicsSettings::mBaumgarte.
+	/// This lets an integration preserve a gentle contact Baumgarte while giving authored constraints their intended stiffness.
+	void						SetPositionCorrectionStrength(float inStrength) { JPH_ASSERT(inStrength >= -1.0f && inStrength <= 1.0f); mPositionCorrectionStrength = inStrength; }
+	float						GetPositionCorrectionStrength() const		{ return mPositionCorrectionStrength; }
+
 	/// Enable / disable this constraint. This can e.g. be used to implement a breakable constraint by detecting that the constraint impulse
 	/// (see e.g. PointConstraint::GetTotalLambdaPosition) went over a certain limit and then disabling the constraint.
 	/// Note that although a disabled constraint will not affect the simulation in any way anymore, it does incur some processing overhead.
@@ -232,6 +237,9 @@ private:
 
 	/// Used only when the constraint is active. Override for the number of solver position iterations to run, 0 means use the default in PhysicsSettings::mNumPositionSteps. The number of iterations to use is the max of all contacts and constraints in the island.
 	uint8						mNumPositionStepsOverride = 0;
+
+	/// Fraction of positional error corrected per solver step, or a negative value to use PhysicsSettings::mBaumgarte.
+	float						mPositionCorrectionStrength = -1.0f;
 
 	/// If this constraint is currently enabled
 	bool						mEnabled = true;
