@@ -82,6 +82,11 @@ public:
 	SpringSettings &			GetLimitsSpringSettings()									{ return mLimitsSpringSettings; }
 	void						SetLimitsSpringSettings(const SpringSettings &inLimitsSpringSettings) { mLimitsSpringSettings = inLimitsSpringSettings; }
 
+	/// Configure velocity-level limit stabilization. This also enables predictive activation before a fast body crosses a limit.
+	void						SetLimitsVelocityBias(float inBiasFactor, float inDamping) { JPH_ASSERT(inBiasFactor >= 0.0f && inBiasFactor <= 1.0f); JPH_ASSERT(inDamping >= 0.0f && inDamping <= 1.0f); mLimitsVelocityBiasFactor = inBiasFactor; mLimitsVelocityDamping = inDamping; }
+	float						GetLimitsVelocityBiasFactor() const						{ return mLimitsVelocityBiasFactor; }
+	float						GetLimitsVelocityDamping() const						{ return mLimitsVelocityDamping; }
+
 	///@name Get Lagrange multiplier from last physics update (the linear impulse applied to satisfy the constraint)
 	inline float				GetTotalLambdaPosition() const								{ return mAxisConstraint.GetTotalLambda(); }
 
@@ -101,6 +106,12 @@ private:
 
 	// Soft constraint limits
 	SpringSettings				mLimitsSpringSettings;
+
+	// Optional velocity-level stabilization for hard limits
+	float						mLimitsVelocityBiasFactor = 0.0f;
+	float						mLimitsVelocityDamping = 0.0f;
+	float						mLimitsVelocityErrorBias = 0.0f;
+	bool						mUseLimitsVelocityBias = false;
 
 	// RUN TIME PROPERTIES FOLLOW
 

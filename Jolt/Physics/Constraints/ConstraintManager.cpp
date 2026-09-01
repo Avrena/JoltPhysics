@@ -164,8 +164,7 @@ bool ConstraintManager::sSolvePositionConstraints(Constraint **inActiveConstrain
 	for (const uint32 *constraint_idx = inConstraintIdxBegin; constraint_idx < inConstraintIdxEnd; ++constraint_idx)
 	{
 		Constraint *c = inActiveConstraints[*constraint_idx];
-		const float strength = c->GetPositionCorrectionStrength();
-		any_impulse_applied |= c->SolvePositionConstraint(inDeltaTime, strength >= 0.0f? strength : inBaumgarte);
+		any_impulse_applied |= c->SolvePositionConstraint(inDeltaTime, inBaumgarte);
 	}
 
 	return any_impulse_applied;

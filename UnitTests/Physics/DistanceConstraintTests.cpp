@@ -71,4 +71,57 @@ TEST_SUITE("DistanceConstraintTests")
 			}
 		}
 	}
+
+	TEST_CASE("TestDistanceVelocityBiasCorrectsOutsideLimit")
+	{
+		PhysicsTestContext context;
+		context.ZeroGravity();
+		PhysicsSettings physics_settings = context.GetSystem()->GetPhysicsSettings();
+		physics_settings.mNumVelocitySteps = 1;
+		physics_settings.mNumPositionSteps = 0;
+		context.GetSystem()->SetPhysicsSettings(physics_settings);
+
+		Body &body = context.CreateSphere(RVec3(12, 0, 0), 0.5f, EMotionType::Dynamic, EMotionQuality::Discrete, Layers::MOVING);
+		body.GetMotionProperties()->SetLinearDamping(0.0f);
+
+		DistanceConstraintSettings constraint;
+		constraint.mPoint1 = RVec3::sZero();
+		constraint.mPoint2 = body.GetPosition();
+		constraint.mMinDistance = 0.0f;
+		constraint.mMaxDistance = 10.0f;
+		DistanceConstraint &distance_constraint = context.CreateConstraint<DistanceConstraint>(Body::sFixedToWorld, body, constraint);
+		distance_constraint.SetLimitsVelocityBias(1.0f, 0.5f);
+
+		context.SimulateSingleStep();
+
+		CHECK_APPROX_EQUAL(10.0_r, body.GetPosition().GetX(), 1.0e-5_r);
+		CHECK_APPROX_EQUAL(-120.0f, body.GetLinearVelocity().GetX(), 1.0e-4f);
+	}
+
+	TEST_CASE("TestDistanceVelocityBiasPredictsLimitCrossing")
+	{
+		PhysicsTestContext context;
+		context.ZeroGravity();
+		PhysicsSettings physics_settings = context.GetSystem()->GetPhysicsSettings();
+		physics_settings.mNumVelocitySteps = 4;
+		physics_settings.mNumPositionSteps = 0;
+		context.GetSystem()->SetPhysicsSettings(physics_settings);
+
+		Body &body = context.CreateSphere(RVec3(9, 0, 0), 0.5f, EMotionType::Dynamic, EMotionQuality::Discrete, Layers::MOVING);
+		body.GetMotionProperties()->SetLinearDamping(0.0f);
+		body.SetLinearVelocity(Vec3(120, 0, 0));
+
+		DistanceConstraintSettings constraint;
+		constraint.mPoint1 = RVec3::sZero();
+		constraint.mPoint2 = body.GetPosition();
+		constraint.mMinDistance = 0.0f;
+		constraint.mMaxDistance = 10.0f;
+		DistanceConstraint &distance_constraint = context.CreateConstraint<DistanceConstraint>(Body::sFixedToWorld, body, constraint);
+		distance_constraint.SetLimitsVelocityBias(1.0f, 0.5f);
+
+		context.SimulateSingleStep();
+
+		CHECK_APPROX_EQUAL(9.125_r, body.GetPosition().GetX(), 1.0e-5_r);
+		CHECK_APPROX_EQUAL(7.5f, body.GetLinearVelocity().GetX(), 1.0e-4f);
+	}
 }

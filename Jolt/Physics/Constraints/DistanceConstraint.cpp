@@ -128,9 +128,24 @@ void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime)
 	Vec3 r1_plus_u = Vec3(mWorldSpacePosition2 - mBody1->GetCenterOfMassPosition());
 	Vec3 r2 = Vec3(mWorldSpacePosition2 - mBody2->GetCenterOfMassPosition());
 
+	mUseLimitsVelocityBias = false;
+	const bool use_velocity_bias = !mLimitsSpringSettings.HasStiffness()
+		&& (mLimitsVelocityBiasFactor > 0.0f || mLimitsVelocityDamping > 0.0f)
+		&& inDeltaTime > 0.0f;
+	const float relative_velocity = mWorldSpaceNormal.Dot(
+		mBody1->GetPointVelocity(mWorldSpacePosition1) - mBody2->GetPointVelocity(mWorldSpacePosition2));
+	auto calculate_properties = [this, inDeltaTime, use_velocity_bias, &r1_plus_u, &r2](float inError)
+	{
+		mLimitsVelocityErrorBias = use_velocity_bias
+			? mLimitsVelocityBiasFactor * inError / inDeltaTime
+			: 0.0f;
+		mUseLimitsVelocityBias = use_velocity_bias;
+		mAxisConstraint.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, r1_plus_u, *mBody2, r2, mWorldSpaceNormal, mLimitsVelocityErrorBias, inError, mLimitsSpringSettings);
+	};
+
 	if (mMinDistance == mMaxDistance)
 	{
-		mAxisConstraint.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, r1_plus_u, *mBody2, r2, mWorldSpaceNormal, 0.0f, delta_len - mMinDistance, mLimitsSpringSettings);
+		calculate_properties(delta_len - mMinDistance);
 
 		// Single distance, allow constraint forces in both directions
 		mMinLambda = -FLT_MAX;
@@ -138,7 +153,7 @@ void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime)
 	}
 	else if (delta_len <= mMinDistance)
 	{
-		mAxisConstraint.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, r1_plus_u, *mBody2, r2, mWorldSpaceNormal, 0.0f, delta_len - mMinDistance, mLimitsSpringSettings);
+		calculate_properties(delta_len - mMinDistance);
 
 		// Allow constraint forces to make distance bigger only
 		mMinLambda = 0;
@@ -146,11 +161,32 @@ void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime)
 	}
 	else if (delta_len >= mMaxDistance)
 	{
-		mAxisConstraint.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, r1_plus_u, *mBody2, r2, mWorldSpaceNormal, 0.0f, delta_len - mMaxDistance, mLimitsSpringSettings);
+		calculate_properties(delta_len - mMaxDistance);
 
 		// Allow constraint forces to make distance smaller only
 		mMinLambda = -FLT_MAX;
 		mMaxLambda = 0;
+	}
+	else if (use_velocity_bias)
+	{
+		// Havana/IVP checks the next transform while a stiff spring is still inside
+		// its interval. Activate the matching one-sided limit before a fast anchor
+		// crosses it, using the current (zero) error and the authored damping target.
+		const float predicted_distance = delta_len - relative_velocity * inDeltaTime;
+		if (predicted_distance <= mMinDistance)
+		{
+			calculate_properties(0.0f);
+			mMinLambda = 0;
+			mMaxLambda = FLT_MAX;
+		}
+		else if (predicted_distance >= mMaxDistance)
+		{
+			calculate_properties(0.0f);
+			mMinLambda = -FLT_MAX;
+			mMaxLambda = 0;
+		}
+		else
+			mAxisConstraint.Deactivate();
 	}
 	else
 		mAxisConstraint.Deactivate();
@@ -174,7 +210,18 @@ void DistanceConstraint::WarmStartVelocityConstraint(float inWarmStartImpulseRat
 bool DistanceConstraint::SolveVelocityConstraint(float inDeltaTime)
 {
 	if (mAxisConstraint.IsActive())
+	{
+		if (mUseLimitsVelocityBias)
+		{
+			// Havana/IVP recalculates this term every solver iteration, so each pass
+			// removes the authored fraction of the current relative anchor velocity.
+			const float relative_velocity = mWorldSpaceNormal.Dot(
+				mBody1->GetPointVelocity(mWorldSpacePosition1) - mBody2->GetPointVelocity(mWorldSpacePosition2));
+			mAxisConstraint.SetVelocityBias(
+				(1.0f - mLimitsVelocityDamping) * relative_velocity + mLimitsVelocityErrorBias);
+		}
 		return mAxisConstraint.SolveVelocityConstraint(*mBody1, *mBody2, mWorldSpaceNormal, mMinLambda, mMaxLambda);
+	}
 	else
 		return false;
 }
