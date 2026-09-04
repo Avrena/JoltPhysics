@@ -251,14 +251,6 @@ public:
 		return mEffectiveMass != 0.0f;
 	}
 
-	/// Update the target velocity of an active hard constraint without recalculating its effective mass.
-	inline void					SetVelocityBias(float inBias)
-	{
-		JPH_ASSERT(IsActive());
-		JPH_ASSERT(!mSpringPart.IsActive());
-		mSpringPart.CalculateSpringPropertiesWithBias(inBias);
-	}
-
 	/// Must be called from the WarmStartVelocityConstraint call to apply the previous frame's impulses
 	/// @param ioBody1 The first body that this constraint is attached to
 	/// @param ioBody2 The second body that this constraint is attached to

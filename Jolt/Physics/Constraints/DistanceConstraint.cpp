@@ -128,19 +128,20 @@ void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime)
 	Vec3 r1_plus_u = Vec3(mWorldSpacePosition2 - mBody1->GetCenterOfMassPosition());
 	Vec3 r2 = Vec3(mWorldSpacePosition2 - mBody2->GetCenterOfMassPosition());
 
-	mUseLimitsVelocityBias = false;
 	const bool use_velocity_bias = !mLimitsSpringSettings.HasStiffness()
 		&& (mLimitsVelocityBiasFactor > 0.0f || mLimitsVelocityDamping > 0.0f)
 		&& inDeltaTime > 0.0f;
 	const float relative_velocity = mWorldSpaceNormal.Dot(
 		mBody1->GetPointVelocity(mWorldSpacePosition1) - mBody2->GetPointVelocity(mWorldSpacePosition2));
-	auto calculate_properties = [this, inDeltaTime, use_velocity_bias, &r1_plus_u, &r2](float inError)
+	auto calculate_properties = [this, inDeltaTime, use_velocity_bias, relative_velocity, &r1_plus_u, &r2](float inError)
 	{
-		mLimitsVelocityErrorBias = use_velocity_bias
-			? mLimitsVelocityBiasFactor * inError / inDeltaTime
+		// Source applies this damping/error update once when stepping a standalone
+		// stiff spring. Jolt may visit the row many times to converge the island,
+		// so all PGS iterations must solve toward the same setup-time target.
+		const float velocity_bias = use_velocity_bias
+			? (1.0f - mLimitsVelocityDamping) * relative_velocity + mLimitsVelocityBiasFactor * inError / inDeltaTime
 			: 0.0f;
-		mUseLimitsVelocityBias = use_velocity_bias;
-		mAxisConstraint.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, r1_plus_u, *mBody2, r2, mWorldSpaceNormal, mLimitsVelocityErrorBias, inError, mLimitsSpringSettings);
+		mAxisConstraint.CalculateConstraintPropertiesWithSettingsForLimit(inDeltaTime, *mBody1, r1_plus_u, *mBody2, r2, mWorldSpaceNormal, velocity_bias, inError, mLimitsSpringSettings);
 	};
 
 	if (mMinDistance == mMaxDistance)
@@ -210,18 +211,7 @@ void DistanceConstraint::WarmStartVelocityConstraint(float inWarmStartImpulseRat
 bool DistanceConstraint::SolveVelocityConstraint(float inDeltaTime)
 {
 	if (mAxisConstraint.IsActive())
-	{
-		if (mUseLimitsVelocityBias)
-		{
-			// Havana/IVP recalculates this term every solver iteration, so each pass
-			// removes the authored fraction of the current relative anchor velocity.
-			const float relative_velocity = mWorldSpaceNormal.Dot(
-				mBody1->GetPointVelocity(mWorldSpacePosition1) - mBody2->GetPointVelocity(mWorldSpacePosition2));
-			mAxisConstraint.SetVelocityBias(
-				(1.0f - mLimitsVelocityDamping) * relative_velocity + mLimitsVelocityErrorBias);
-		}
 		return mAxisConstraint.SolveVelocityConstraint(*mBody1, *mBody2, mWorldSpaceNormal, mMinLambda, mMaxLambda);
-	}
 	else
 		return false;
 }

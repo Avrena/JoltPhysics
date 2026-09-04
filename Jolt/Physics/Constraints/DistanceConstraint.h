@@ -82,7 +82,8 @@ public:
 	SpringSettings &			GetLimitsSpringSettings()									{ return mLimitsSpringSettings; }
 	void						SetLimitsSpringSettings(const SpringSettings &inLimitsSpringSettings) { mLimitsSpringSettings = inLimitsSpringSettings; }
 
-	/// Configure velocity-level limit stabilization. This also enables predictive activation before a fast body crosses a limit.
+	/// Configure Source-style velocity-level limit stabilization. The target is sampled once per physics step,
+	/// and predictive activation responds before a fast body is expected to cross a limit.
 	void						SetLimitsVelocityBias(float inBiasFactor, float inDamping) { JPH_ASSERT(inBiasFactor >= 0.0f && inBiasFactor <= 1.0f); JPH_ASSERT(inDamping >= 0.0f && inDamping <= 1.0f); mLimitsVelocityBiasFactor = inBiasFactor; mLimitsVelocityDamping = inDamping; }
 	float						GetLimitsVelocityBiasFactor() const						{ return mLimitsVelocityBiasFactor; }
 	float						GetLimitsVelocityDamping() const						{ return mLimitsVelocityDamping; }
@@ -110,8 +111,6 @@ private:
 	// Optional velocity-level stabilization for hard limits
 	float						mLimitsVelocityBiasFactor = 0.0f;
 	float						mLimitsVelocityDamping = 0.0f;
-	float						mLimitsVelocityErrorBias = 0.0f;
-	bool						mUseLimitsVelocityBias = false;
 
 	// RUN TIME PROPERTIES FOLLOW
 
