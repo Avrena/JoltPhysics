@@ -351,8 +351,9 @@ EPhysicsUpdateError PhysicsSystem::Update(float inDeltaTime, int inCollisionStep
 					{
 						context.mPhysicsSystem->JobApplyGravity(&context, &step);
 
+						JobHandle::sRemoveDependencies(step.mSetupVelocityConstraints);
 						JobHandle::sRemoveDependencies(step.mFindCollisions);
-					}, num_step_listener_jobs > 0? num_step_listener_jobs : previous_step_dependency_count); // depends on: step listeners (or previous step if no step listeners)
+					}, 1 + (num_step_listener_jobs > 0? num_step_listener_jobs : previous_step_dependency_count)); // depends on: setup-job construction, step listeners (or previous step if no step listeners)
 
 			// This job will setup velocity constraints for non-collision constraints
 			step.mSetupVelocityConstraints.resize(num_setup_velocity_constraints_jobs);
@@ -362,7 +363,12 @@ EPhysicsUpdateError PhysicsSystem::Update(float inDeltaTime, int inCollisionStep
 						context.mPhysicsSystem->JobSetupVelocityConstraints(context.mStepDeltaTime, &step);
 
 						JobHandle::sRemoveDependencies(step.mSolveVelocityConstraints);
-					}, num_determine_active_constraints_jobs + 1); // depends on: determine active constraints, finish building jobs
+					}, num_apply_gravity_jobs + num_determine_active_constraints_jobs + 1); // depends on: apply gravity, determine active constraints, finish building jobs
+
+			// Distance-limit stabilization samples post-force velocities during setup.
+			// Keep gravity blocked until the setup handles it releases all exist, even
+			// with an immediate-execution job system and no step listeners.
+			JobHandle::sRemoveDependencies(step.mApplyGravity);
 
 			// This job will build islands from constraints
 			step.mBuildIslandsFromConstraints = inJobSystem->CreateJob("BuildIslandsFromConstraints", cColorBuildIslandsFromConstraints, [&context, &step]()
@@ -793,8 +799,9 @@ void PhysicsSystem::JobApplyGravity(const PhysicsUpdateContext *ioContext, Physi
 void PhysicsSystem::JobSetupVelocityConstraints(float inDeltaTime, PhysicsUpdateContext::Step *ioStep) const
 {
 #ifdef JPH_ENABLE_ASSERTS
-	// We only read positions
-	BodyAccess::Grant grant(BodyAccess::EAccess::None, BodyAccess::EAccess::Read);
+	// Gravity/force integration is complete; velocities remain read-only until
+	// all constraint setup jobs finish and the velocity solver can start.
+	BodyAccess::Grant grant(BodyAccess::EAccess::Read, BodyAccess::EAccess::Read);
 #endif
 
 	uint32 num_constraints = ioStep->mNumActiveConstraints;

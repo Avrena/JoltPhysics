@@ -4,11 +4,118 @@
 
 #include "UnitTestFramework.h"
 #include "PhysicsTestContext.h"
+#include <Jolt/Core/JobSystemSingleThreaded.h>
 #include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/PhysicsStepListener.h>
 #include "Layers.h"
+
+namespace
+{
+	// Force the legal scheduling order in which ready gravity jobs run last.
+	// This exposes missing setup dependencies without relying on a timing race.
+	class GravityLastJobSystem final : public JobSystem
+	{
+	public:
+		explicit GravityLastJobSystem(bool inDelayGravity) : mDelayGravity(inDelayGravity), mInner(cMaxPhysicsJobs) { }
+		int GetMaxConcurrency() const override { return 1; }
+		JobHandle CreateJob(const char *inName, ColorArg inColor, const JobFunction &inFunction, uint32 inDependencies = 0) override
+		{
+			const bool delay = mDelayGravity && strcmp(inName, "ApplyGravity") == 0;
+			JobHandle job = mInner.CreateJob(inName, inColor, inFunction, inDependencies + (delay? 1 : 0));
+			mJobs.push_back(job);
+			if (delay)
+				mDelayedGravity.push_back(job);
+			return job;
+		}
+		Barrier *CreateBarrier() override { return mInner.CreateBarrier(); }
+		void DestroyBarrier(Barrier *inBarrier) override { mInner.DestroyBarrier(inBarrier); }
+		void WaitForJobs(Barrier *inBarrier) override
+		{
+			for (const JobHandle &job : mDelayedGravity)
+				job.RemoveDependency();
+			mInner.WaitForJobs(inBarrier);
+			for (const JobHandle &job : mJobs)
+				CHECK(job.IsDone());
+			mDelayedGravity.clear();
+			mJobs.clear();
+		}
+	protected:
+		// Jobs belong to mInner, so these callbacks must never reach this wrapper.
+		void QueueJob(Job *) override { FAIL("Unexpected wrapper QueueJob"); }
+		void QueueJobs(Job **, uint) override { FAIL("Unexpected wrapper QueueJobs"); }
+		void FreeJob(Job *) override { FAIL("Unexpected wrapper FreeJob"); }
+	private:
+		bool mDelayGravity;
+		JobSystemSingleThreaded mInner;
+		Array<JobHandle> mJobs;
+		Array<JobHandle> mDelayedGravity;
+	};
+}
 
 TEST_SUITE("DistanceConstraintTests")
 {
+	TEST_CASE("TestDistanceVelocityBiasUsesPostForceSnapshot")
+	{
+		for (int substeps : { 1, 2 })
+			for (bool with_listener : { false, true })
+			{
+				CAPTURE(substeps);
+				CAPTURE(with_listener);
+				RVec3 reference_position = RVec3::sZero();
+				Vec3 reference_velocity = Vec3::sZero();
+				// Immediate execution, gravity deliberately last, and real workers.
+				for (int schedule : { 0, 1, 2 })
+				{
+					CAPTURE(schedule);
+					PhysicsTestContext context(1.0f / 22.0f, substeps, schedule == 2? 4 : 0);
+					context.ZeroGravity();
+					PhysicsSettings physics_settings = context.GetSystem()->GetPhysicsSettings();
+					physics_settings.mNumVelocitySteps = 10;
+					physics_settings.mNumPositionSteps = 0;
+					context.GetSystem()->SetPhysicsSettings(physics_settings);
+					Body &body = context.CreateSphere(RVec3(9, 0, 0), 0.5f, EMotionType::Dynamic, EMotionQuality::Discrete, Layers::MOVING);
+					body.GetMotionProperties()->SetLinearDamping(0.0f);
+					const float step_dt = context.GetStepDeltaTime();
+					body.AddForce(Vec3(2.0f / (step_dt * step_dt * body.GetMotionProperties()->GetInverseMass()), 0, 0));
+
+					DistanceConstraintSettings settings;
+					settings.mPoint2 = body.GetPosition();
+					settings.mMinDistance = 0.0f;
+					settings.mMaxDistance = 10.0f;
+					DistanceConstraint &constraint = context.CreateConstraint<DistanceConstraint>(Body::sFixedToWorld, body, settings);
+					constraint.SetLimitsVelocityBias(1.0f, 0.5f);
+					if (schedule == 2)
+						for (int i = 0; i < 256; ++i)
+							context.CreateSphere(RVec3(2.0f * (i % 16), 10.0f + 2.0f * (i / 16), 0), 0.1f, EMotionType::Dynamic, EMotionQuality::Discrete, Layers::MOVING2);
+
+					struct StepListener : PhysicsStepListener
+					{
+						void OnStep(const PhysicsStepListenerContext &) override { ++mCalls; }
+						int mCalls = 0;
+					} listener;
+					if (with_listener)
+						context.GetSystem()->AddStepListener(&listener);
+					GravityLastJobSystem jobs(schedule == 1);
+					CHECK(context.GetSystem()->Update(context.GetDeltaTime(), substeps, context.GetTempAllocator(), schedule == 2? context.GetJobSystem() : &jobs) == EPhysicsUpdateError::None);
+					if (with_listener)
+					{
+						context.GetSystem()->RemoveStepListener(&listener);
+						CHECK(listener.mCalls == substeps);
+					}
+					if (schedule == 0)
+					{
+						reference_position = body.GetPosition();
+						reference_velocity = body.GetLinearVelocity();
+					}
+					else
+					{
+						CHECK_APPROX_EQUAL(reference_position, body.GetPosition(), 1.0e-5_r);
+						CHECK_APPROX_EQUAL(reference_velocity, body.GetLinearVelocity(), 1.0e-4f);
+					}
+				}
+			}
+	}
+
 	// Test if the distance constraint can be used to create a spring
 	TEST_CASE("TestDistanceSpring")
 	{

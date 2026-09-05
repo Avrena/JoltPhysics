@@ -111,7 +111,7 @@ void DistanceConstraint::NotifyShapeChanged(const BodyID &inBodyID, Vec3Arg inDe
 		mLocalSpacePosition2 -= inDeltaCOM;
 }
 
-void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime)
+void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime, bool inCalculateVelocityBias)
 {
 	// Update world space positions (the bodies may have moved)
 	mWorldSpacePosition1 = mBody1->GetCenterOfMassTransform() * mLocalSpacePosition1;
@@ -128,11 +128,13 @@ void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime)
 	Vec3 r1_plus_u = Vec3(mWorldSpacePosition2 - mBody1->GetCenterOfMassPosition());
 	Vec3 r2 = Vec3(mWorldSpacePosition2 - mBody2->GetCenterOfMassPosition());
 
-	const bool use_velocity_bias = !mLimitsSpringSettings.HasStiffness()
+	const bool use_velocity_bias = inCalculateVelocityBias && !mLimitsSpringSettings.HasStiffness()
 		&& (mLimitsVelocityBiasFactor > 0.0f || mLimitsVelocityDamping > 0.0f)
 		&& inDeltaTime > 0.0f;
-	const float relative_velocity = mWorldSpaceNormal.Dot(
-		mBody1->GetPointVelocity(mWorldSpacePosition1) - mBody2->GetPointVelocity(mWorldSpacePosition2));
+	// Setup runs after force integration and before any warm-start impulses.
+	// Position solving and ordinary springs must not sample velocity here.
+	const float relative_velocity = use_velocity_bias? mWorldSpaceNormal.Dot(
+		mBody1->GetPointVelocity(mWorldSpacePosition1) - mBody2->GetPointVelocity(mWorldSpacePosition2)) : 0.0f;
 	auto calculate_properties = [this, inDeltaTime, use_velocity_bias, relative_velocity, &r1_plus_u, &r2](float inError)
 	{
 		// Source applies this damping/error update once when stepping a standalone
@@ -195,7 +197,7 @@ void DistanceConstraint::CalculateConstraintProperties(float inDeltaTime)
 
 void DistanceConstraint::SetupVelocityConstraint(float inDeltaTime)
 {
-	CalculateConstraintProperties(inDeltaTime);
+	CalculateConstraintProperties(inDeltaTime, true);
 }
 
 void DistanceConstraint::ResetWarmStart()
@@ -232,7 +234,7 @@ bool DistanceConstraint::SolvePositionConstraint(float inDeltaTime, float inBaum
 		if (position_error != 0.0f)
 		{
 			// Update constraint properties (bodies may have moved)
-			CalculateConstraintProperties(inDeltaTime);
+			CalculateConstraintProperties(inDeltaTime, false);
 
 			return mAxisConstraint.SolvePositionConstraint(*mBody1, *mBody2, mWorldSpaceNormal, position_error, inBaumgarte);
 		}

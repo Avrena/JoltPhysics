@@ -93,7 +93,7 @@ public:
 
 private:
 	// Internal helper function to calculate the values below
-	void						CalculateConstraintProperties(float inDeltaTime);
+	void						CalculateConstraintProperties(float inDeltaTime, bool inCalculateVelocityBias);
 
 	// CONFIGURATION PROPERTIES FOLLOW
 
